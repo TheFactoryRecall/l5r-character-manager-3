@@ -27,7 +27,7 @@
 #     persist and emit ``reloadRequired`` for the QML side to surface a
 #     restart toast.
 
-from qtpy.QtCore import QObject, Property, Signal, Slot
+from qtpy.QtCore import QObject, Property, QT_TRANSLATE_NOOP, Signal, Slot
 
 import l5r.api as api
 import l5r.api.character
@@ -37,26 +37,35 @@ from l5r.util import log
 from l5r.util.settings import L5RCMSettings
 
 
+# Labels are wrapped in QT_TRANSLATE_NOOP rather than left as bare
+# literals: the property translates them at runtime with
+# self.tr(label), but `label` is a variable there, so pylupdate6 can't
+# see the source text through that call. QT_TRANSLATE_NOOP marks each
+# literal for extraction into the "SettingsProxy" context (it returns the
+# string unchanged at runtime) -- the same context self.tr() resolves
+# against, so the harvested translation is the one that gets used. Keep
+# the context string in sync with this class's name.
+
 # The locales the legacy SettingsWidget offered. Kept verbatim so the two
 # front-ends present the same choices; the labels are tr()-wrapped at
 # build time (see availableLocales).
 _LOCALES = [
-    ("en_US", "US English"),
-    ("en_GB", "UK English"),
-    ("it_IT", "Italian"),
-    ("es_ES", "Spanish"),
-    ("fr_FR", "French"),
-    ("pt_BR", "Portuguese (Brazil)"),
-    ("ru_RU", "Russian"),
+    ("en_US", QT_TRANSLATE_NOOP("SettingsProxy","US English")),
+    ("en_GB", QT_TRANSLATE_NOOP("SettingsProxy","UK English")),
+    ("it_IT", QT_TRANSLATE_NOOP("SettingsProxy","Italian")),
+    ("es_ES", QT_TRANSLATE_NOOP("SettingsProxy","Spanish")),
+    ("fr_FR", QT_TRANSLATE_NOOP("SettingsProxy","French")),
+    ("pt_BR", QT_TRANSLATE_NOOP("SettingsProxy","Portuguese (Brazil)")),
+    ("ru_RU", QT_TRANSLATE_NOOP("SettingsProxy","Russian"))
 ]
 
 # Insight-calculation methods -- the int maps to api.rules.calculate_insight
 # (which reads pc.insight_calculation). Mirrors the legacy combo in
 # l5r/widgets/settings.py.
 _INSIGHT_METHODS = [
-    (1, "Default"),
-    (2, "Ignore Rank 1 Skills"),
-    (3, "Account Rank 1 School Skills"),
+    (1, QT_TRANSLATE_NOOP("SettingsProxy","Default")),
+    (2, QT_TRANSLATE_NOOP("SettingsProxy","Ignore Rank 1 Skills")),
+    (3, QT_TRANSLATE_NOOP("SettingsProxy","Account Rank 1 School Skills"))
 ]
 
 # UI text-size choices. The id is the persisted key (settings.app
@@ -64,18 +73,30 @@ _INSIGHT_METHODS = [
 # (see _FONT_SCALES). Only two choices are offered, per the design intent:
 # "Standard" (1.0) and "Large" (1.25).
 _FONT_SIZES = [
-    ("standard", "Standard"),
-    ("large", "Large"),
-    ("larger", "Larger"),
-    ("huge", "Huge"),
+    ("standard", QT_TRANSLATE_NOOP("SettingsProxy","Standard")),
+    ("large", QT_TRANSLATE_NOOP("SettingsProxy","Large")),
+    ("larger", QT_TRANSLATE_NOOP("SettingsProxy","Larger")),
+    ("huge", QT_TRANSLATE_NOOP("SettingsProxy","Huge"))
 ]
 
 _FONT_SCALES = {
     "standard": 1.0,
     "large": 1.15,
     "larger": 1.25,
-    "huge": 1.45,
+    "huge": 1.45
 }
+
+_EXP_DISPLAYS = [
+    (1, QT_TRANSLATE_NOOP("SettingsProxy","Points Used / Earned")),
+    (2, QT_TRANSLATE_NOOP("SettingsProxy","Points Available / Earned")),
+    (3, QT_TRANSLATE_NOOP("SettingsProxy","Points Available / Points Used"))
+]
+
+_HEALTH_METHODS = [
+    ('default', QT_TRANSLATE_NOOP("SettingsProxy","Default")),
+    ('stacked', QT_TRANSLATE_NOOP("SettingsProxy","Health left")),
+    ('wounds', QT_TRANSLATE_NOOP("SettingsProxy","Total wounds"))
+]
 
 
 class SettingsProxy(QObject):
@@ -89,6 +110,9 @@ class SettingsProxy(QObject):
     useQmlUiChanged = Signal()
     buyForFreeChanged = Signal()
     fontSizeChanged = Signal()
+    expDisplayChanged = Signal()
+    healthMethodChanged = Signal()
+
 
     # Emitted when a setting was persisted but cannot take effect until the
     # app is restarted (language, front-end switch). Carries the message
@@ -115,6 +139,16 @@ class SettingsProxy(QObject):
     def fontSizes(self):
         return [{"id": key, "name": self.tr(label)}
                 for key, label in _FONT_SIZES]
+
+    @Property("QVariantList", constant=True)
+    def expDisplays(self):
+        return [{"id": key, "name": self.tr(label)}
+                for key, label in _EXP_DISPLAYS]
+
+    @Property("QVariantList", constant=True)
+    def healthMethods(self):
+        return [{"id": key, "name": self.tr(label)}
+                for key, label in _HEALTH_METHODS]
 
     # --- localization ------------------------------------------------
 
@@ -219,6 +253,45 @@ class SettingsProxy(QObject):
         self._settings.app.ui_font_size = value
         self._settings.sync()
         self.fontSizeChanged.emit()
+
+    @Property(str, notify=healthMethodChanged)
+    def healthMethod(self):
+        return (self._settings.app.health_method or "default")
+        
+    @Slot(str)
+    def setHealthMethod(self, value):
+        if value == self.healthMethod:
+            return
+        self._settings.app.health_method = value
+        self._settings.sync()
+        api.signals.bus().wounds_changed.emit()
+        self.healthMethodChanged.emit()
+
+    # --- EXP display (applied live via Theme.expDisplay) -------------
+    @Property(int, notify=expDisplayChanged)
+    def expDisplay(self):
+        try:
+            return int(self._settings.app.ui_exp_display)
+        except (TypeError, ValueError):
+            return 1
+
+    @Slot(int)
+    def setExpDisplay(self, value):
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            log.app.warning(u"QML UI: invalid experience display %r", value)
+            return
+
+        if value == self.expDisplay:
+            return
+
+        self._settings.app.ui_exp_display = value
+        self._settings.sync()
+        self.expDisplayChanged.emit()
+
+
+
 
     # --- PDF export (read by the exporter at export time) ------------
 
