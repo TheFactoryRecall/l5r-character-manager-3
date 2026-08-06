@@ -495,8 +495,8 @@ def get_wound_penalties(index):
     WOUND_PENALTIES_VALUES = [0, 3, 5, 10, 15, 20, 40]
     result = WOUND_PENALTIES_VALUES[index]
 
-    if (not api.character._datapack_provides('strength_of_earth')
-            and api.character.has_rule('strength_of_earth')):
+    if (not api.character._datapack_provides('strength_of_the_earth')
+            and api.character.has_rule('strength_of_the_earth')):
         # Advantage: Strength of Earh (Core, pg154)
         result = max(0, result-3)
 
